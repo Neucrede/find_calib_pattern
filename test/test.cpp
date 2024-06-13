@@ -65,7 +65,7 @@ int LiveVideoTest(int argc, char* argv[])
         // std::cout << "\x1b[2J\x1b[1;1H" << std::endl;
         std::cout << "Frame #" << nFrame << "\n";
 
-        if (xcalib::FindHalconCalibBoard(frame, centers, patSize)) {
+        if (FindHalconCalibBoard(frame, centers, patSize)) {
             ShowResults(frame, centers, patSize);
         }
 
@@ -90,7 +90,7 @@ int StillImageTest(int argc, char* argv[])
 
     // std::cout << "\x1b[2J\x1b[1;1H" << std::endl;
 
-    if (xcalib::FindHalconCalibBoard(frame, centers, patSize)) {
+    if (FindHalconCalibBoard(frame, centers, patSize)) {
         ShowResults(frame, centers, patSize);
     }
 

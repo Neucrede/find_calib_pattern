@@ -14,9 +14,6 @@
 #include <vector>
 #include <opencv2/core.hpp>
 
-namespace xcalib
-{
-
 /**
  * \brief Find HALCON calibration board pattern from given image and return centers
  * in the grid of solid circle pattern if all of them were found.
@@ -44,8 +41,6 @@ namespace xcalib
  */
 bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
         cv::Size patSize = cv::Size(7, 7), int thresh = -1, bool subPixel = true);
-
-}
 
 #endif /* __FIND_HALCON_CALBRD_HPP__ */
 

@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <numeric>
 #include <algorithm>
 #include <vector>
+#include <stdexcept>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
@@ -64,17 +65,15 @@ template <typename Tp>
 static bool FindFourCorners(const std::vector<cv::Point_<Tp>>& points, 
         std::vector<int>& cornerIndices);
 
-bool xcalib::FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
+bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
         cv::Size patSize, int thresh, bool subPixel)
 {
     if (img.empty()) {
-        CV_Error(cv::Error::StsBadArg, "img is empty.");
-        return false;
+        throw std::invalid_argument("img is empty.");
     }
 
     if ((patSize.width < 2) || (patSize.height < 2)) {
-        CV_Error(cv::Error::StsOutOfRange, "Pattern size can't be smaller than 2x2.");
-        return false;
+        throw std::invalid_argument("Pattern size can't be smaller than 2x2.");
     }
 
     cv::Mat imgGray;
