@@ -1,18 +1,23 @@
 /**
- * \file find_halcon_calbrd.hpp
+ * \file find_calib_pattern.hpp
  *
  * \author Neucrede neucrede@sina.com
  * \version 1.1
  *
- * \brief Find HALCON calibration board.
+ * \brief Subroutines for the search of calibration patterns.
  *
  */
 
-#ifndef __FIND_HALCON_CALBRD_HPP__
-#define __FIND_HALCON_CALBRD_HPP__
+#ifndef __FIND_CALIB_PATTERN_HPP__
+#define __FIND_CALIB_PATTERN_HPP__
 
 #include <vector>
 #include <opencv2/core.hpp>
+
+bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
+        cv::Size patSize = cv::Size(7, 7), int thresh = -1, bool inverseThresh = false,
+        bool subPixel = true, const cv::Mat& mask = cv::Mat(),
+        const std::vector<cv::Point2f>& cornerPointsHint = std::vector<cv::Point2f>());
 
 /**
  * \brief Find HALCON calibration board pattern from given image and return centers
@@ -42,5 +47,6 @@
 bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
         cv::Size patSize = cv::Size(7, 7), int thresh = -1, bool subPixel = true);
 
-#endif /* __FIND_HALCON_CALBRD_HPP__ */
+
+#endif /* __FIND_CALIB_PATTERN_HPP__ */
 

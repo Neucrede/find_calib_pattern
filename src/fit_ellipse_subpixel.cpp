@@ -49,9 +49,20 @@ bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
         return false;
     }
 
+    double perim = cv::arcLength(points, true);
+    double area = cv::contourArea(points, false);
+    double circularity = 4 * M_PI * area / (perim * perim);
+    if (circularity < 0.5) {
+        return false;
+    }
+
     // Fit an ellipse using given points and find its bounding rect.
     cv::RotatedRect ellipse0 = cv::fitEllipseAMS(points);
     cv::Rect boundRect0 = ellipse0.boundingRect();
+    if (boundRect0.width < 8 || boundRect0.height < 8) {
+        return false;
+    }
+
     // Inflate bounding rect.
     boundRect0 = cv::Rect(boundRect0.x - neighbourSize, boundRect0.y - neighbourSize,
                 boundRect0.width + 2 * neighbourSize, boundRect0.height + 2 * neighbourSize)
@@ -65,7 +76,9 @@ bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
     // Create mask. Find sub-pixel edge points in 5x5 neighbourhood of each given point.
     cv::Mat mask(boundRect0.size(), CV_8UC1, cv::Scalar::all(0));
     for (const cv::Point& pt : points) {
-        mask.at<unsigned char>(std::max(0, pt.y - y0), std::max(0, pt.x - x0)) = 255;
+        mask.at<unsigned char>(
+            std::min(boundRect0.height - 1, std::max(0, pt.y - y0)), 
+            std::min(boundRect0.width - 1, std::max(0, pt.x - x0))) = 255;
     }
     cv::dilate(mask, mask, cv::Mat::ones(3, 3, CV_8UC1));
 

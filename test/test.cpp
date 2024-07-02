@@ -8,7 +8,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/videoio.hpp>
-#include "find_halcon_calbrd.hpp"
+#include "find_calib_pattern.hpp"
 
 static const std::string gs_windowName = "FindHalconCalibBoard()";
 
@@ -65,6 +65,7 @@ int LiveVideoTest(int argc, char* argv[])
         // std::cout << "\x1b[2J\x1b[1;1H" << std::endl;
         std::cout << "Frame #" << nFrame << "\n";
 
+        // if (FindCirclesGridPattern(frame, centers, patSize)) {
         if (FindHalconCalibBoard(frame, centers, patSize)) {
             ShowResults(frame, centers, patSize);
         }
@@ -90,7 +91,8 @@ int StillImageTest(int argc, char* argv[])
 
     // std::cout << "\x1b[2J\x1b[1;1H" << std::endl;
 
-    if (FindHalconCalibBoard(frame, centers, patSize)) {
+    if (FindCirclesGridPattern(frame, centers, patSize)) {
+    // if (FindHalconCalibBoard(frame, centers, patSize)) {
         ShowResults(frame, centers, patSize);
     }
 
