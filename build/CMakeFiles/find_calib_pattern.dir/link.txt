@@ -1,2 +1,0 @@
-C:\mingw64\bin\ar.exe qc libfind_calib_pattern.a CMakeFiles/find_calib_pattern.dir/src/find_calib_pattern.cpp.obj CMakeFiles/find_calib_pattern.dir/src/fit_ellipse_subpixel.cpp.obj
-C:\mingw64\bin\ranlib.exe libfind_calib_pattern.a
