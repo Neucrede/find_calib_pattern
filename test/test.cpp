@@ -12,12 +12,12 @@
 
 static const std::string gs_windowName = "FindHalconCalibBoard()";
 
-void ShowResults(cv::Mat& frame, const std::vector<cv::Point2f>& centers, const cv::Size& patSize)
+void ShowResults(cv::Mat& frame, const std::vector<cv::Point2d>& centers, const cv::Size& patSize)
 {
     const int N = patSize.width * patSize.height;
 
     for (int i = 0; i != N; ++i) {
-        const cv::Point2f &pt = centers[i];
+        const cv::Point2d &pt = centers[i];
         if (i == 0) {
             cv::drawMarker(frame, pt, cv::Scalar(0, 255, 0), cv::MARKER_STAR, 16);
         }
@@ -29,7 +29,7 @@ void ShowResults(cv::Mat& frame, const std::vector<cv::Point2f>& centers, const 
         }
 
         if (i != N - 1) {
-            const cv::Point2f &ptNext = centers[(i + 1) % N];
+            const cv::Point2d &ptNext = centers[(i + 1) % N];
             cv::line(frame, pt, ptNext, cv::Scalar(255, 0, 0));
         }
     }
@@ -48,9 +48,13 @@ int LiveVideoTest(int argc, char* argv[])
 {
     cv::Mat frame;
 
+#ifdef __linux__
     cv::VideoCapture cap("/dev/video0");
+#else
+    cv::VideoCapture cap(0);
+#endif
 
-    std::vector<cv::Point2f> centers;
+    std::vector<cv::Point2d> centers;
     const cv::Size patSize(7, 7);
 
     std::cout << std::fixed << std::setprecision(3);
@@ -69,6 +73,15 @@ int LiveVideoTest(int argc, char* argv[])
         if (FindHalconCalibBoard(frame, centers, patSize)) {
             ShowResults(frame, centers, patSize);
         }
+        else {
+            for (int thresh = 10; thresh != 250; thresh += 10) {
+                // if (FindCirclesGridPattern(frame, centers, patSize, thresh)) {
+                if (FindHalconCalibBoard(frame, centers, patSize, thresh)) {
+                    ShowResults(frame, centers, patSize);
+                    break;
+                }
+            }
+        }
 
         std::cout << std::endl;
 
@@ -84,7 +97,7 @@ int StillImageTest(int argc, char* argv[])
     cv::Mat frame = cv::imread(argv[1]);
     if (frame.empty()) return 1;
 
-    std::vector<cv::Point2f> centers;
+    std::vector<cv::Point2d> centers;
     const cv::Size patSize(7, 7);
 
     std::cout << std::fixed << std::setprecision(3);
@@ -94,6 +107,15 @@ int StillImageTest(int argc, char* argv[])
     if (FindCirclesGridPattern(frame, centers, patSize)) {
     // if (FindHalconCalibBoard(frame, centers, patSize)) {
         ShowResults(frame, centers, patSize);
+    }
+    else {
+        for (int thresh = 10; thresh != 250; thresh += 10) {
+            // if (FindCirclesGridPattern(frame, centers, patSize, thresh)) {
+            if (FindHalconCalibBoard(frame, centers, patSize, thresh)) {
+                ShowResults(frame, centers, patSize);
+                break;
+            }
+        }
     }
 
     cv::imshow(gs_windowName, frame);
@@ -115,4 +137,3 @@ int main(int argc, char* argv[])
         return LiveVideoTest(argc, argv);
     }
 }
-

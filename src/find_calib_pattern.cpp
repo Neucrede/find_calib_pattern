@@ -47,8 +47,18 @@ extern bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
     const std::vector<cv::Point>& points, cv::RotatedRect& ellipse); // fit_ellipse_subpixel.cpp
 
 template <typename Tp1, typename Tp2>
-static inline float PointLineDistance(const cv::Point_<Tp1>& pt, const cv::Point_<Tp2>& ptLineA,
+static inline double PointLineDistance(const cv::Point_<Tp1>& pt, const cv::Point_<Tp2>& ptLineA,
         const cv::Point_<Tp2>& ptLineB);
+
+template <typename Tp1, typename Tp2, typename Tp3>
+static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
+        const cv::Point_<Tp2>& pt0, const cv::Point_<Tp3>& ptLineA, 
+        const cv::Point_<Tp3>& ptLineB);
+
+template <typename Tp1, typename Tp2, typename Tp3>
+static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
+        const std::vector<int>& indices, const cv::Point_<Tp2>& pt0, 
+        const cv::Point_<Tp3>& ptLineA, const cv::Point_<Tp3>& ptLineB);
 
 template <typename Tp1, typename Tp2>
 static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points, 
@@ -63,7 +73,8 @@ static bool FindFourCorners(const std::vector<cv::Point_<Tp>>& points,
         std::vector<int>& cornerIndices);
 
 template <typename Tp1, typename Tp2>
-static bool SortCenterPoints(cv::Size patSize, const std::vector<cv::Point_<Tp1>>& cornerPoints, 
+static bool SortEllipsesAndCenterPoints(cv::Size patSize, const std::vector<cv::Point_<Tp1>>& cornerPoints, 
+    const std::vector<cv::RotatedRect>& ellipses, std::vector<cv::RotatedRect>& sortedEllipses,
     const std::vector<cv::Point_<Tp2>>& centerPoints, std::vector<cv::Point_<Tp2>>& sortedCenterPoints);
 
 static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, int total,
@@ -71,12 +82,12 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         std::vector<cv::Point>& innerContour, std::vector<int>& blobIndicesFiltered,
         bool inverseThresh = false);
 
-static bool HierarchicalClustering(const std::vector<cv::Point2f> &points, const cv::Size &patternSz, 
+static bool HierarchicalClustering(const std::vector<cv::Point2d> &points, const cv::Size &patternSz, 
     std::vector<int> &patternPointIndices);
 
-bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
+bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
         cv::Size patSize, int thresh, bool inverseThresh, bool subPixel, const cv::Mat& mask,
-        const std::vector<cv::Point2f>& cornerPointsHint)
+        const std::vector<cv::Point2d>& cornerPointsHint, std::vector<cv::RotatedRect>* sortedEllipses)
 {
     if (img.empty()) {
         throw std::invalid_argument("img is empty.");
@@ -92,7 +103,7 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
         cv::cvtColor(img, imgGray, cv::COLOR_BGR2GRAY);
     }
     else {
-        imgGray = img;
+        imgGray = img.clone();
     }
 
     // Filter then apply masking.
@@ -143,8 +154,11 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
                     continue;
                 }
             }
-            else {
+            else if (contours[idx].size() >= 6) {
                 ellipse = cv::fitEllipseAMS(contours[idx]);
+            }
+            else {
+                continue;
             }
             
             if (ellipse.boundingRect().area() >= 64) {
@@ -161,7 +175,7 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
     // Find largest cluster of center points.
     std::vector<int> blobIndices;
     {
-        std::vector<cv::Point2f> points;
+        std::vector<cv::Point2d> points;
         points.reserve(numEllipses);
         for (const cv::RotatedRect& ellipse : ellipses) {
             points.push_back(ellipse.center);
@@ -173,60 +187,62 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
     }
 
     // Compute standard deviations of minor and major lengths of ellipses.
-    std::vector<float> minorLengths, majorLengths;
+    std::vector<double> minorLengths, majorLengths;
     minorLengths.reserve(total);
     majorLengths.reserve(total);
-    float meanMinorLength = 0.0f, meanMajorLength = 0.0f;
+    double meanMinorLength = 0.0f, meanMajorLength = 0.0f;
     for (int idx : blobIndices) {
         const cv::RotatedRect& ellipse = ellipses[idx];
 
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         meanMinorLength += minorLength;
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         meanMajorLength += majorLength;
     }
 
-    meanMinorLength /= (float)(total);
-    meanMajorLength /= (float)(total);
+    meanMinorLength /= (double)(total);
+    meanMajorLength /= (double)(total);
 
-    float stddevMajorLength = 0.0f, stddevMinorLength = 0.0f;
+    double stddevMajorLength = 0.0f, stddevMinorLength = 0.0f;
     for (int idx : blobIndices) {
         const cv::RotatedRect& ellipse = ellipses[idx];
 
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         stddevMinorLength += std::pow(minorLength - meanMinorLength, 2);
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         stddevMajorLength += std::pow(majorLength - meanMajorLength, 2);
     }
 
-    stddevMinorLength = std::sqrt(stddevMinorLength / (float)(total));
-    stddevMajorLength = std::sqrt(stddevMajorLength / (float)(total));
+    stddevMinorLength = std::sqrt(stddevMinorLength / (double)(total));
+    stddevMajorLength = std::sqrt(stddevMajorLength / (double)(total));
     
     // The range of valid major and minor lengths.
-    const float 
-        lowMinLen = meanMinorLength - std::max(0.25f * meanMinorLength, 3.0f * stddevMinorLength),
-        uppMinLen = meanMinorLength + std::max(0.25f * meanMinorLength, 3.0f * stddevMinorLength),
-        lowMajLen = meanMajorLength - std::max(0.25f * meanMajorLength, 3.0f * stddevMajorLength),
-        uppMajLen = meanMajorLength + std::max(0.25f * meanMajorLength, 3.0f * stddevMajorLength);
+    const double 
+        lowMinLen = meanMinorLength - std::max(0.5f * meanMinorLength, 3.0f * stddevMinorLength),
+        uppMinLen = meanMinorLength + std::max(0.5f * meanMinorLength, 3.0f * stddevMinorLength),
+        lowMajLen = meanMajorLength - std::max(0.5f * meanMajorLength, 3.0f * stddevMajorLength),
+        uppMajLen = meanMajorLength + std::max(0.5f * meanMajorLength, 3.0f * stddevMajorLength);
 
     // Filter ellipses by their major and minor lengths using 3ss.
-    std::vector<cv::Point2f> centerPoints;
+    std::vector<cv::Point2d> centerPoints;
     centerPoints.reserve(total);
+    std::vector<cv::RotatedRect> ellipsesFiltered;
     for (int idx : blobIndices) {
         const cv::RotatedRect& ellipse = ellipses[idx];
 
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         if ((minorLength < lowMinLen) || (minorLength > uppMinLen)) {
             continue;
         }
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         if ((majorLength < lowMajLen) || (majorLength > uppMajLen)) {
             continue;
         }
 
+        ellipsesFiltered.push_back(ellipse);
         centerPoints.push_back(ellipse.center);
     }
 
@@ -234,9 +250,20 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
         return false;
     }
 
-    // If 4 corner points are given in the order { origin, rear X, rear Y, diagonal }.
+    // If 4 corner points are given in the order { origin, rear X, diagonal, rearY }.
     if (cornerPointsHint.size() == 4) {
-        return SortCenterPoints(patSize, cornerPointsHint, centerPoints, sortedCenterPoints);
+        std::vector<cv::RotatedRect> _sortedEllipses;
+        if (!SortEllipsesAndCenterPoints(patSize, cornerPointsHint, ellipsesFiltered, _sortedEllipses,
+            centerPoints, sortedCenterPoints)) 
+        {
+            return false;
+        }
+
+        if (sortedEllipses) {
+            *sortedEllipses = std::move(_sortedEllipses);
+        }
+
+        return true;
     }
     // Otherwise...
 
@@ -251,7 +278,7 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
         std::vector<cv::Point2f> points;
         points.reserve(4);
         for (int i : cornerIndices) {
-            points.push_back(centerPoints[i]);
+            points.push_back(cv::Point2f(centerPoints[i]));
         }
 
         std::vector<int> hull;
@@ -268,31 +295,42 @@ bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2f>& sorted
 
     // Find bottom left corner.
     int idxBottomLeft = 0;
-    const cv::Point2f ptImageBottomLeft(0.0f, (float)(img.rows));
-    float minDist = 1.0e9f;
+    const cv::Point2d ptImageBottomLeft(0.0f, (double)(img.rows));
+    double minDist = 1.0e9f;
 //    for (int idx : cornerIndices) {
     for (int i = 0; i != 4; ++i) {
         int idx = cornerIndices[i];
-        const cv::Point2f& pt = centerPoints[idx];
-        float dist = std::hypot(pt.x - ptImageBottomLeft.x, pt.y - ptImageBottomLeft.y);
+        const cv::Point2d& pt = centerPoints[idx];
+        double dist = std::hypot(pt.x - ptImageBottomLeft.x, pt.y - ptImageBottomLeft.y);
         if (dist < minDist) {
             idxBottomLeft = i;
             minDist = dist;
         }
     }
 
-    // Sort in the order { origin = bottom left corner, rear X, rear Y, diagonal }.
-    std::vector<cv::Point2f> cornerPoints;
+    // Sort in the order { origin = bottom left corner, rear X, diagonal, rearY }.
+    std::vector<cv::Point2d> cornerPoints;
     cornerPoints.reserve(4);
     for (int i = idxBottomLeft; i != idxBottomLeft + 4; ++i) {
         cornerPoints.push_back(centerPoints[cornerIndices[i % 4]]);
     }
 
-    return SortCenterPoints(patSize, cornerPoints, centerPoints, sortedCenterPoints); 
+    std::vector<cv::RotatedRect> _sortedEllipses;
+    if (!SortEllipsesAndCenterPoints(patSize, cornerPoints, ellipsesFiltered, _sortedEllipses,
+        centerPoints, sortedCenterPoints)) 
+    {
+        return false;
+    }
+
+    if (sortedEllipses) {
+        *sortedEllipses = std::move(_sortedEllipses);
+    }
+
+    return true;
 }
 
-bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCenterPoints,
-        cv::Size patSize, int thresh, bool subPixel)
+bool /* DeviceCalibration:: */ FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
+        cv::Size patSize, int thresh, bool subPixel, std::vector<cv::RotatedRect>* sortedEllipses)
 {
     if (img.empty()) {
         throw std::invalid_argument("img is empty.");
@@ -307,7 +345,7 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
         cv::cvtColor(img, imgGray, cv::COLOR_BGR2GRAY);
     }
     else {
-        imgGray = img;
+        imgGray = img.clone();
     }
 
     cv::GaussianBlur(imgGray, imgGray, cv::Size(5, 5), 1.5);
@@ -331,10 +369,10 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
     // * Compute means and standard deviations of major and minor axis lengths.
     std::vector<cv::RotatedRect> ellipses;
     ellipses.reserve(total);
-    std::vector<float> minorLengths, majorLengths;
+    std::vector<double> minorLengths, majorLengths;
     minorLengths.reserve(total);
     majorLengths.reserve(total);
-    float meanMinorLength = 0.0f, meanMajorLength = 0.0f;
+    double meanMinorLength = 0.0f, meanMajorLength = 0.0f;
     cv::RotatedRect ellipse;
     for (int idx : blobIndicesFiltered) {
         if (subPixel) {
@@ -355,29 +393,29 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
             }
         }
 
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         meanMinorLength += minorLength;
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         meanMajorLength += majorLength;
     }
 
-    meanMinorLength /= (float)(total);
-    meanMajorLength /= (float)(total);
+    meanMinorLength /= (double)(total);
+    meanMajorLength /= (double)(total);
 
-    float stddevMajorLength = 0.0f, stddevMinorLength = 0.0f;
+    double stddevMajorLength = 0.0f, stddevMinorLength = 0.0f;
     for (const cv::RotatedRect& ellipse : ellipses) {
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         stddevMinorLength += std::pow(minorLength - meanMinorLength, 2);
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         stddevMajorLength += std::pow(majorLength - meanMajorLength, 2);
     }
 
-    stddevMinorLength = std::sqrt(stddevMinorLength / (float)(total));
-    stddevMajorLength = std::sqrt(stddevMajorLength / (float)(total));
+    stddevMinorLength = std::sqrt(stddevMinorLength / (double)(total));
+    stddevMajorLength = std::sqrt(stddevMajorLength / (double)(total));
     
-    const float 
+    const double 
         lowMinLen = meanMinorLength - std::max(0.25f * meanMinorLength, 3.0f * stddevMinorLength),
         uppMinLen = meanMinorLength + std::max(0.25f * meanMinorLength, 3.0f * stddevMinorLength),
         lowMajLen = meanMajorLength - std::max(0.25f * meanMajorLength, 3.0f * stddevMajorLength),
@@ -385,19 +423,21 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
 
     // * Filter ellipses by their major and minor lengths using 3ss.
     // * Compute center of ellipses.
-    std::vector<cv::Point2f> centerPoints;
+    std::vector<cv::Point2d> centerPoints;
     centerPoints.reserve(total);
+    std::vector<cv::RotatedRect> ellipsesFiltered;
     for (const cv::RotatedRect& ellipse : ellipses) {
-        float minorLength = std::min(ellipse.size.width, ellipse.size.height);
+        double minorLength = std::min(ellipse.size.width, ellipse.size.height);
         if ((minorLength < lowMinLen) || (minorLength > uppMinLen)) {
             return false;
         }
 
-        float majorLength = std::max(ellipse.size.width, ellipse.size.height);
+        double majorLength = std::max(ellipse.size.width, ellipse.size.height);
         if ((majorLength < lowMajLen) || (majorLength > uppMajLen)) {
             return false;
         }
 
+        ellipsesFiltered.push_back(ellipse);
         centerPoints.push_back(ellipse.center);
     }
 
@@ -417,17 +457,17 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
     // Find a point nearest to the shortest segment and set it as the origin.
     const cv::Point &ptLineA = innerContour[idxMinLen],
                     &ptLineB = innerContour[(idxMinLen + 1) % M];
-    float minDist = 1.0e9f;
+    double minDist = 1.0e9f;
     int idxOrigin = 0;
     for (int i = 0; i != total; ++i) {
-        const cv::Point2f& pt = centerPoints[i];
-        float dist = PointLineDistance(pt, ptLineA, ptLineB);
+        const cv::Point2d& pt = centerPoints[i];
+        double dist = PointLineDistance(pt, ptLineA, ptLineB);
         if (dist < minDist) {
             idxOrigin = i;
             minDist = dist;
         }
     }
-    const cv::Point2f& ptOrigin = centerPoints[idxOrigin];
+    const cv::Point2d& ptOrigin = centerPoints[idxOrigin];
 
     // Find a outer corner point nearest to origin.
     int idxOuter0 = FindNearestPoint(outerContour, ptOrigin);
@@ -465,25 +505,80 @@ bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2f>& sortedCe
         FindNearestPoint(centerPoints, cornerIndices, ptOuter1),
         FindNearestPoint(centerPoints, cornerIndices, outerContour[(idxOuter0 + 2) % 4]),
         FindNearestPoint(centerPoints, cornerIndices, ptOuter2) };
-    std::vector<cv::Point2f> cornerPoints;
+    std::vector<cv::Point2d> cornerPoints;
     cornerPoints.reserve(4);
     for (int i = 0; i != 4; ++i) {
         cornerPoints.push_back(centerPoints[sortedCornerIndices[i]]);
     }
 
-    return SortCenterPoints(patSize, cornerPoints, centerPoints, sortedCenterPoints);
+    std::vector<cv::RotatedRect> _sortedEllipses;
+    if (!SortEllipsesAndCenterPoints(patSize, cornerPoints, ellipsesFiltered, _sortedEllipses,
+        centerPoints, sortedCenterPoints)) 
+    {
+        return false;
+    }
+
+    if (sortedEllipses) {
+        *sortedEllipses = std::move(_sortedEllipses);
+    }
+
+    return true;
 }
 
 template <typename Tp1, typename Tp2>
-static inline float PointLineDistance(const cv::Point_<Tp1>& pt, const cv::Point_<Tp2>& ptLineA,
+static inline double PointLineDistance(const cv::Point_<Tp1>& pt, const cv::Point_<Tp2>& ptLineA,
         const cv::Point_<Tp2>& ptLineB)
 {
-    float xP = pt.x - ptLineA.x, yP = pt.y - ptLineA.y, xV = ptLineB.x - ptLineA.x,
+    double xP = pt.x - ptLineA.x, yP = pt.y - ptLineA.y, xV = ptLineB.x - ptLineA.x,
           yV = ptLineB.y - ptLineA.y;
-    float vecLen = std::hypot(xV, yV) + 1.0e-9f;
-    float crossProd = xP * yV - xV * yP;
+    double vecLen = std::hypot(xV, yV) + 1.0e-9f;
+    double crossProd = xP * yV - xV * yP;
 
     return std::abs(crossProd) / vecLen;
+}
+
+template <typename Tp1, typename Tp2, typename Tp3>
+static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
+        const cv::Point_<Tp2>& pt0, const cv::Point_<Tp3>& ptLineA, 
+        const cv::Point_<Tp3>& ptLineB)
+{
+    cv::Point_<Tp1> pt00 = pt0;
+
+    int idx = -1;
+    double minDist = 1.0e9f;
+    for (int i = 0; i != points.size(); ++i) {
+        const cv::Point_<Tp1>& pt = points[i];
+        double dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
+        dist += PointLineDistance(pt, ptLineA, ptLineB);
+        if (dist < minDist) {
+            idx = i;
+            minDist = dist;
+        }
+    }
+
+    return idx;
+}
+
+template <typename Tp1, typename Tp2, typename Tp3>
+static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
+        const std::vector<int>& indices, const cv::Point_<Tp2>& pt0, 
+        const cv::Point_<Tp3>& ptLineA, const cv::Point_<Tp3>& ptLineB)
+{
+    cv::Point_<Tp1> pt00 = pt0;
+
+    int idx = -1;
+    double minDist = 1.0e9f;
+    for (int i = 0; i != points.size(); ++i) {
+        const cv::Point_<Tp1>& pt = points[indices[i]];
+        double dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
+        dist += PointLineDistance(pt, ptLineA, ptLineB);
+        if (dist < minDist) {
+            idx = i;
+            minDist = dist;
+        }
+    }
+
+    return idx;
 }
 
 template <typename Tp1, typename Tp2>
@@ -493,10 +588,10 @@ static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
     cv::Point_<Tp1> pt00 = pt0;
 
     int idx = -1;
-    float minDist = 1.0e9f;
+    double minDist = 1.0e9f;
     for (int i = 0; i != points.size(); ++i) {
         const cv::Point_<Tp1>& pt = points[i];
-        float dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
+        double dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
         if (dist < minDist) {
             idx = i;
             minDist = dist;
@@ -513,10 +608,10 @@ static int FindNearestPoint(const std::vector<cv::Point_<Tp1>>& points,
     cv::Point_<Tp1> pt00 = pt0;
 
     int idx = -1;
-    float minDist = 1.0e9f;
+    double minDist = 1.0e9f;
     for (int i = 0; i != indices.size(); ++i) {
         const cv::Point_<Tp1>& pt = points[indices[i]];
-        float dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
+        double dist = std::hypot(pt.x - pt00.x, pt.y - pt00.y);
         if (dist < minDist) {
             idx = indices[i];
             minDist = dist;
@@ -530,20 +625,26 @@ template <typename Tp>
 static bool FindFourCorners(const std::vector<cv::Point_<Tp>>& points, 
         std::vector<int>& cornerIndices)
 {
+    std::vector<cv::Point2f> points32f;
+    points32f.reserve(points.size());
+    for (const auto& pt : points) {
+        points32f.push_back(cv::Point2f(pt));
+    }
+
     std::vector<int> hull;
-    cv::convexHull(points, hull);
+    cv::convexHull(points32f, hull);
     if (hull.size() < 4) {
         return false;
     }
 
     // Compute cosine of angles formed by adjacent 3 vertices.
-    std::vector<float> angleCosines;
+    std::vector<double> angleCosines;
     angleCosines.reserve(hull.size());
     for (int i = 0; i != hull.size(); ++i) {
         const int K = hull.size();
-        cv::Vec2f vec1 = cv::Point2f(points[hull[(i + 1) % K]] - points[hull[i]]);
-        cv::Vec2f vec2 = cv::Point2f(points[hull[(i - 1 + K) % K]] - points[hull[i]]);
-        float cosAngle = std::abs((float)(vec1.dot(vec2) / (cv::norm(vec1) * cv::norm(vec2))));
+        cv::Vec2d vec1 = cv::Point2d(points[hull[(i + 1) % K]] - points[hull[i]]);
+        cv::Vec2d vec2 = cv::Point2d(points[hull[(i - 1 + K) % K]] - points[hull[i]]);
+        double cosAngle = std::abs((double)(vec1.dot(vec2) / (cv::norm(vec1) * cv::norm(vec2))));
         angleCosines.push_back(cosAngle);
     }
 
@@ -569,12 +670,13 @@ static bool FindFourCorners(const std::vector<cv::Point_<Tp>>& points,
 }
 
 template <typename Tp1, typename Tp2>
-static bool SortCenterPoints(cv::Size patSize, const std::vector<cv::Point_<Tp1>>& cornerPoints, 
+static bool SortEllipsesAndCenterPoints(cv::Size patSize, const std::vector<cv::Point_<Tp1>>& cornerPoints, 
+    const std::vector<cv::RotatedRect>& ellipses, std::vector<cv::RotatedRect>& sortedEllipses,
     const std::vector<cv::Point_<Tp2>>& centerPoints, std::vector<cv::Point_<Tp2>>& sortedCenterPoints)
 {
     // Rectify centre points.
-    std::vector<cv::Point2f> rectifiedPoints;
-    std::vector<cv::Point2f> srcPoints;
+    std::vector<cv::Point2d> rectifiedPoints;
+    std::vector<cv::Point2d> srcPoints;
     srcPoints.reserve(4);
     for (int i = 0; i != 4; ++i) {
         srcPoints.push_back(cornerPoints[i]);
@@ -582,31 +684,40 @@ static bool SortCenterPoints(cv::Size patSize, const std::vector<cv::Point_<Tp1>
 
     double len1 = cv::norm(srcPoints[1] - srcPoints[0]),
            len2 = cv::norm(srcPoints[2] - srcPoints[0]);
-    float stride = (float)(len1 + len2) / (float)(2 * (patSize.width + patSize.height - 2)) + 1.0f;
-    std::vector<cv::Point2f> destPoints = {
+    double stride = (double)(len1 + len2) / (double)(2 * (patSize.width + patSize.height - 2)) + 1.0f;
+    std::vector<cv::Point2d> destPoints = {
         {0, 0}, 
-        {(float)(patSize.width - 1) * stride, 0},
-        {(float)(patSize.width - 1) * stride, (float)(patSize.height - 1) * stride},
-        {0, (float)(patSize.height - 1) * stride} };
+        {(double)(patSize.width - 1) * stride, 0},
+        {(double)(patSize.width - 1) * stride, (double)(patSize.height - 1) * stride},
+        {0, (double)(patSize.height - 1) * stride} };
 
     cv::Mat H = cv::findHomography(srcPoints, destPoints, 0);
     cv::perspectiveTransform(centerPoints, rectifiedPoints, H);
 
-    // Sort centre points in ascending dictionary order.
+    // Sort ellipses and centre points in ascending dictionary order.
     sortedCenterPoints.clear();
     sortedCenterPoints.reserve(patSize.width * patSize.height);
+    sortedEllipses.clear();
+    sortedEllipses.reserve(patSize.width * patSize.height);
     for (int r = 0; r != patSize.height; ++r) {
         for (int c = 0; c != patSize.width; ++c) {
-            cv::Point2f ptIdeal((float)(c) * stride, (float)(r) * stride);
+            cv::Point2d ptIdeal((double)(c) * stride, (double)(r) * stride);
+            /*
             int idx = FindNearestPoint(rectifiedPoints, ptIdeal);
+            */
+            cv::Point2d ptA(0.0, (double)(r) * stride);
+            cv::Point2d ptB((double)(patSize.width - 1) * stride, (double)(r) * stride);
+            int idx = FindNearestPoint(rectifiedPoints, ptIdeal, ptA, ptB);
+            
             sortedCenterPoints.push_back(centerPoints[idx]);
+            sortedEllipses.push_back(ellipses[idx]);
         }
     }
 
     return true;
 }
 
-static bool HierarchicalClustering(const std::vector<cv::Point2f> &points, const cv::Size &patternSz, 
+static bool HierarchicalClustering(const std::vector<cv::Point2d> &points, const cv::Size &patternSz, 
     std::vector<int> &patternPointIndices)
 {
     // This function was ported from OpenCV 3.4.5 calib3d module with modification.
@@ -675,16 +786,16 @@ static bool HierarchicalClustering(const std::vector<cv::Point2f> &points, const
         }
     }
 
-    cv::Mat dists(n, n, CV_32FC1, cv::Scalar(0));
+    cv::Mat dists(n, n, CV_64FC1, cv::Scalar(0));
     cv::Mat distsMask(dists.size(), CV_8UC1, cv::Scalar(0));
     for(int i = 0; i < n; i++)
     {
         for(j = i+1; j < n; j++)
         {
-            dists.at<float>(i, j) = (float)cv::norm(points[i] - points[j]);
+            dists.at<double>(i, j) = (double)cv::norm(points[i] - points[j]);
             distsMask.at<uchar>(i, j) = 255;
             distsMask.at<uchar>(j, i) = 255;//distsMask.at<uchar>(i, j);
-            dists.at<float>(j, i) = dists.at<float>(i, j);
+            dists.at<double>(j, i) = dists.at<double>(i, j);
         }
     }
 
@@ -796,12 +907,12 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         // to be deleted if the distance from first to last point is smaller
         // than `distThresh`.
         const int N = approxPointsInner.size();
-        float distThresh = cv::arcLength(approxPointsInner, true) / 16.0f;
+        double distThresh = cv::arcLength(approxPointsInner, true) / 16.0f;
         std::vector<int> marks(N, 0);
         for (int j = 0; j != N + 1; ++j) {
             const cv::Point &ptFirst = approxPointsInner[j % N], 
                             &ptLast = approxPointsInner[(j + 2) % N];
-            float dist = std::hypot(ptFirst.x - ptLast.x, ptFirst.y - ptLast.y);
+            double dist = std::hypot(ptFirst.x - ptLast.x, ptFirst.y - ptLast.y);
             if (dist < distThresh) {
                 marks[(j + 1) % N] = 1;
             }
@@ -830,7 +941,7 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
 
     // Compute blob areas.
     std::vector<int> blobIndices;
-    std::vector<float> blobAreas;
+    std::vector<double> blobAreas;
     blobIndices.reserve(total);
     blobAreas.reserve(total);
     for (int i = 0; i != numContours; ++i) {
@@ -839,32 +950,34 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         }
         
         const std::vector<cv::Point>& contour = contours[i];
-        blobIndices.push_back(i);
-        blobAreas.push_back(cv::contourArea(contour));
+        if (contour.size() >= 6) {
+            blobIndices.push_back(i);
+            blobAreas.push_back(cv::contourArea(contour));
+        }
     }
 
     // Compute mean and standard deviation of blob areas.
     const int numBlobs = blobIndices.size();
-    float meanArea = 0.0f;
-    for (float area : blobAreas) {
+    double meanArea = 0.0f;
+    for (double area : blobAreas) {
         meanArea += area;
     }
-    meanArea = meanArea / (float)(numBlobs);
+    meanArea = meanArea / (double)(numBlobs);
 
-    float stddevArea = 0.0f;
-    for (float area : blobAreas) {
+    double stddevArea = 0.0f;
+    for (double area : blobAreas) {
         stddevArea += std::pow(area - meanArea, 2);
     }
-    stddevArea = std::sqrt(stddevArea / (float)(numBlobs));
+    stddevArea = std::sqrt(stddevArea / (double)(numBlobs));
 
     // Filter blobs by area using 3-sigma rule of thumb.
-    float area1 = meanArea - std::max(0.25f * meanArea, 3.0f * stddevArea), 
+    double area1 = meanArea - std::max(0.25f * meanArea, 3.0f * stddevArea), 
           area2 = meanArea + std::max(0.25f * meanArea, 3.0f * stddevArea);
     blobIndicesFiltered.clear();
     blobIndicesFiltered.reserve(numBlobs);
     for (int i = 0; i != numBlobs; ++i) {
         int idx = blobIndices[i];
-        float area = blobAreas[i];
+        double area = blobAreas[i];
         if ((area >= area1) && (area <= area2)) {
             blobIndicesFiltered.push_back(idx);
         }
@@ -872,3 +985,4 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
 
     return (blobIndicesFiltered.size() == total);
 }
+

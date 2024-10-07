@@ -102,7 +102,7 @@ bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
     //
     // Rafael Grompone von Gioi, Gregory Randall, 
     // A Sub-Pixel Edge Detector: an Implementation of the Canny/Devernay Algorithm, 
-    // Image Processing On Line, 7 (2017), pp. 347–372. 
+    // Image Processing On Line, 7 (2017), pp. 347-372. 
     // https://doi.org/10.5201/ipol.2017.216
     //
     std::vector<cv::Point2f> edgePoints;
