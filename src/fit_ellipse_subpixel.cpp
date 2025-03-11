@@ -6,7 +6,7 @@
 /*
 BSD 2-Clause License
 
-Copyright (c) 2018, 
+Copyright (c) 2018-Now, Neucrede <neucrede@sina.com>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -57,7 +57,7 @@ bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
     }
 
     // Fit an ellipse using given points and find its bounding rect.
-    cv::RotatedRect ellipse0 = cv::fitEllipseAMS(points);
+    cv::RotatedRect ellipse0 = cv::fitEllipseDirect(points);
     cv::Rect boundRect0 = ellipse0.boundingRect();
     if (boundRect0.width < 8 || boundRect0.height < 8) {
         return false;
@@ -286,7 +286,7 @@ bool FitEllipseSubPixel(const cv::Mat& gradX, const cv::Mat& gradY,
         return false;
     }
 
-    ellipse = cv::fitEllipseAMS(subPixelPoints);
+    ellipse = cv::fitEllipseDirect(subPixelPoints);
 
     return true;
 }

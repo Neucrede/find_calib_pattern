@@ -6,7 +6,7 @@
 /*
 BSD 2-Clause License
 
-Copyright (c) 2018, 
+Copyright (c) 2018-Now, Neucrede <neucrede@sina.com> 
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -85,7 +85,7 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
 static bool HierarchicalClustering(const std::vector<cv::Point2d> &points, const cv::Size &patternSz, 
     std::vector<int> &patternPointIndices);
 
-bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
+bool FindCirclesGridPattern(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
         cv::Size patSize, int thresh, bool inverseThresh, bool subPixel, const cv::Mat& mask,
         const std::vector<cv::Point2d>& cornerPointsHint, std::vector<cv::RotatedRect>* sortedEllipses)
 {
@@ -118,12 +118,11 @@ bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vec
 
     // Binarization.
     cv::Mat imgMono;
-    if (thresh <= 0) {
+    if (thresh < 0) {
         cv::threshold(imgGray, imgMono, -1, 255, 
             (inverseThresh ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY) + cv::THRESH_OTSU);
     }
     else {
-        if (thresh > 250) thresh = 250;
         cv::threshold(imgGray, imgMono, thresh, 255, 
             inverseThresh ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY);
     }
@@ -149,13 +148,42 @@ bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vec
     {
         cv::RotatedRect ellipse;
         for (int idx = 0; idx != numContours; ++idx) {
+            cv::Moments moments = cv::moments(contours[idx]);
+            double area = moments.m00;
+            
+            // Filter by area
+            {
+                const double areaThresh = img.rows * img.cols / patSize.area();
+                if (area > areaThresh) {
+                    continue;
+                }
+            }
+            
+            // Filter by circularity
+            {
+                double perim = cv::arcLength(contours[idx], true);
+                if (4.0 * M_PI * area / (perim * perim + 1.0) < 0.75) {
+                    continue;
+                }
+            }
+            
+            // Filter by convexity
+            {
+                std::vector<cv::Point> hull;
+                cv::convexHull(contours[idx], hull);
+                double hullArea = cv::contourArea(hull);
+                if (area / (hullArea + 1.0) < 0.9) {
+                    continue;
+                }
+            }
+            
             if (subPixel) {
                 if (!FitEllipseSubPixel(gradX, gradY, contours[idx], ellipse)) {
                     continue;
                 }
             }
             else if (contours[idx].size() >= 6) {
-                ellipse = cv::fitEllipseAMS(contours[idx]);
+                ellipse = cv::fitEllipseDirect(contours[idx]);
             }
             else {
                 continue;
@@ -167,10 +195,35 @@ bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vec
         }
     }
 
-    const int numEllipses = ellipses.size();
-    if (numEllipses < total) {
+    if (ellipses.size() < total) {
         return false;
     }
+    
+    // Sweep away overly small blobbs.
+    {
+        double maxEllipseArea = 0;
+        for (const cv::RotatedRect& ellipse : ellipses) {
+            double area = M_PI * ellipse.size.area();
+            if (area > maxEllipseArea) {
+                maxEllipseArea = area;
+            }
+        }
+        
+        double area0 = 0.5 * maxEllipseArea;
+        
+        std::vector<cv::RotatedRect> goodEllipses;
+        goodEllipses.reserve(total);
+        for (const cv::RotatedRect& ellipse : ellipses) {
+            double area = M_PI * ellipse.size.area();
+            if (area >= area0) {
+                goodEllipses.push_back(ellipse);
+            }
+        }
+        
+        ellipses = std::move(goodEllipses);
+    }
+    
+    const int numEllipses = ellipses.size();
 
     // Find largest cluster of center points.
     std::vector<int> blobIndices;
@@ -297,7 +350,6 @@ bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vec
     int idxBottomLeft = 0;
     const cv::Point2d ptImageBottomLeft(0.0f, (double)(img.rows));
     double minDist = 1.0e9f;
-//    for (int idx : cornerIndices) {
     for (int i = 0; i != 4; ++i) {
         int idx = cornerIndices[i];
         const cv::Point2d& pt = centerPoints[idx];
@@ -329,7 +381,7 @@ bool /*DeviceCalibration::*/ FindCirclesGridPattern(const cv::Mat& img, std::vec
     return true;
 }
 
-bool /* DeviceCalibration:: */ FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
+bool FindHalconCalibBoard(const cv::Mat& img, std::vector<cv::Point2d>& sortedCenterPoints,
         cv::Size patSize, int thresh, bool subPixel, std::vector<cv::RotatedRect>* sortedEllipses)
 {
     if (img.empty()) {
@@ -384,7 +436,7 @@ bool /* DeviceCalibration:: */ FindHalconCalibBoard(const cv::Mat& img, std::vec
             }
         }
         else {
-            ellipse = cv::fitEllipseAMS(contours[idx]);
+            ellipse = cv::fitEllipseDirect(contours[idx]);
             if (ellipse.boundingRect().area() == 0) {
                 return false;
             }
@@ -441,40 +493,45 @@ bool /* DeviceCalibration:: */ FindHalconCalibBoard(const cv::Mat& img, std::vec
         centerPoints.push_back(ellipse.center);
     }
 
-    // Find out the shortest segment.
-    const int M = innerContour.size();
-    double minLen = 1.0e9;
-    int idxMinLen = 0;
-    for (int j = 0; j != M; ++j) {
-        const cv::Point &pt = innerContour[j], &ptNext = innerContour[(j + 1) % M];
-        double len = std::hypot(pt.x - ptNext.x, pt.y - ptNext.y);
-        if (len < minLen) {
-            minLen = len;
-            idxMinLen = j;
+    // Map corner points to rect grids.
+    std::vector<cv::Point> rectifiedOuterPoints = { 
+        {0, 0}, {patSize.width, 0}, {patSize.width, patSize.height}, {0, patSize.width} };
+    cv::Mat H = cv::findHomography(outerContour, rectifiedOuterPoints, 0);
+    std::vector<cv::Point2d> rectifiedInnerPoints;
+    std::vector<cv::Point2d> innerContourDbl;
+    innerContourDbl.reserve(innerContour.size());
+    for (auto pt : innerContour) {
+        innerContourDbl.push_back(cv::Point2d(pt));
+    }
+    cv::perspectiveTransform(innerContourDbl, rectifiedInnerPoints, H);
+
+    // Find a outer corner nearest to the chamfer.
+    int idx0 = 0;
+    double maxDist = 0;
+    for (int j = 0; j != 4; ++j) {
+        const cv::Point& pt = rectifiedOuterPoints[j];
+        
+        int idx = FindNearestPoint(rectifiedInnerPoints, pt);
+        if (idx < 0) {
+            return false;
+        }
+
+        const cv::Point2d& pt1 = rectifiedInnerPoints[idx];
+        double dist = std::hypot(pt.x - pt1.x, pt.y - pt1.y);
+        if (dist > maxDist) {
+            idx0 = j;
+            maxDist = dist;
         }
     }
+    const cv::Point& ptOuter0 = outerContour[idx0];
+    const int idxOuter0 = idx0;
 
-    // Find a point nearest to the shortest segment and set it as the origin.
-    const cv::Point &ptLineA = innerContour[idxMinLen],
-                    &ptLineB = innerContour[(idxMinLen + 1) % M];
-    double minDist = 1.0e9f;
-    int idxOrigin = 0;
-    for (int i = 0; i != total; ++i) {
-        const cv::Point2d& pt = centerPoints[i];
-        double dist = PointLineDistance(pt, ptLineA, ptLineB);
-        if (dist < minDist) {
-            idxOrigin = i;
-            minDist = dist;
-        }
-    }
-    const cv::Point2d& ptOrigin = centerPoints[idxOrigin];
-
-    // Find a outer corner point nearest to origin.
-    int idxOuter0 = FindNearestPoint(outerContour, ptOrigin);
-    if (idxOuter0 < 0) {
+    // Let the point nearest to the chamfer be the origin.
+    idx0 = FindNearestPoint(centerPoints, ptOuter0);
+    if (idx0 < 0) {
         return false;
     }
-    const cv::Point& ptOuter0 = outerContour[idxOuter0];
+    const cv::Point2d& ptOrigin = centerPoints[idx0];
 
     // Find 2 outer contour points falls on X and Y axes respectively. #1 --> X, #2 --> Y.
     cv::Point ptOuter1, ptOuter2;
@@ -699,22 +756,28 @@ static bool SortEllipsesAndCenterPoints(cv::Size patSize, const std::vector<cv::
     sortedCenterPoints.reserve(patSize.width * patSize.height);
     sortedEllipses.clear();
     sortedEllipses.reserve(patSize.width * patSize.height);
+    std::vector<int> indices;
+    indices.reserve(patSize.width * patSize.height);
     for (int r = 0; r != patSize.height; ++r) {
         for (int c = 0; c != patSize.width; ++c) {
             cv::Point2d ptIdeal((double)(c) * stride, (double)(r) * stride);
-            /*
-            int idx = FindNearestPoint(rectifiedPoints, ptIdeal);
-            */
             cv::Point2d ptA(0.0, (double)(r) * stride);
             cv::Point2d ptB((double)(patSize.width - 1) * stride, (double)(r) * stride);
             int idx = FindNearestPoint(rectifiedPoints, ptIdeal, ptA, ptB);
             
             sortedCenterPoints.push_back(centerPoints[idx]);
             sortedEllipses.push_back(ellipses[idx]);
+            indices.push_back(idx);
         }
     }
 
-    return true;
+    int N = patSize.width;
+    cv::Point2d pt0 = rectifiedPoints[indices[0]], pt1 = rectifiedPoints[indices[1]],
+                ptN = rectifiedPoints[indices[N - 1]];
+    double dist01 = std::hypot(pt0.x - pt1.x, pt0.y - pt1.y);
+    double dist0N = std::hypot(pt0.x - ptN.x, pt0.y - ptN.y);
+
+    return ((dist0N > (double)(N - 2) * dist01) && (dist0N < 1.2 * (double)(N - 1) * dist01));
 }
 
 static bool HierarchicalClustering(const std::vector<cv::Point2d> &points, const cv::Size &patternSz, 
@@ -844,12 +907,11 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         bool inverseThresh)
 {
     cv::Mat imgMono;
-    if (thresh <= 0) {
+    if (thresh < 0) {
         cv::threshold(imgGray, imgMono, -1, 255, 
             (inverseThresh ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY) + cv::THRESH_OTSU);
     }
     else {
-        if (thresh > 250) thresh = 250;
         cv::threshold(imgGray, imgMono, thresh, 255, 
             inverseThresh ? cv::THRESH_BINARY_INV : cv::THRESH_BINARY);
     }
@@ -899,38 +961,9 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         if (approxPointsInner.size() < 5) {
             continue;
         }
-
-        // Simplify approximated contour using a simple mark and sweep procedure.
-        //
-        // Mark:
-        // Walk through 3 adjacent vertices each time and mark the centre one
-        // to be deleted if the distance from first to last point is smaller
-        // than `distThresh`.
-        const int N = approxPointsInner.size();
-        double distThresh = cv::arcLength(approxPointsInner, true) / 16.0f;
-        std::vector<int> marks(N, 0);
-        for (int j = 0; j != N + 1; ++j) {
-            const cv::Point &ptFirst = approxPointsInner[j % N], 
-                            &ptLast = approxPointsInner[(j + 2) % N];
-            double dist = std::hypot(ptFirst.x - ptLast.x, ptFirst.y - ptLast.y);
-            if (dist < distThresh) {
-                marks[(j + 1) % N] = 1;
-            }
-        }
-        // Sweep:
-        innerContour.reserve(N);
-        for (int j = 0; j != N; ++j) {
-            if (marks[j] != 1) {
-                innerContour.push_back(approxPointsInner[j]);
-            }
-        }
-
-        const int M = innerContour.size();
-        if (M < 5) {
-            continue;
-        }
         else {
             idxInner = i;
+            innerContour = std::move(approxPointsInner);
             break;
         }
     }
@@ -950,7 +983,37 @@ static bool ExtractContoursHalconCalibBoard(const cv::Mat& imgGray, int thresh, 
         }
         
         const std::vector<cv::Point>& contour = contours[i];
-        if (contour.size() >= 6) {
+        
+        cv::Moments moments = cv::moments(contour);
+        double area = moments.m00;
+        
+        // Filter by area
+        {
+            const double areaThresh = imgGray.rows * imgGray.cols / total;
+            if (area > areaThresh) {
+                continue;
+            }
+        }
+            
+        // Filter by circularity
+        {
+            double perim = cv::arcLength(contour, true);
+            if (4.0 * M_PI * area / (perim * perim + 1.0) < 0.75) {
+                continue;
+            }
+        }
+        
+        // Filter by convexity
+        {
+            std::vector<cv::Point> hull;
+            cv::convexHull(contour, hull);
+            double hullArea = cv::contourArea(hull);
+            if (area / (hullArea + 1.0) < 0.9) {
+                continue;
+            }
+        }
+        
+        if (contour.size() >= 9) {
             blobIndices.push_back(i);
             blobAreas.push_back(cv::contourArea(contour));
         }
